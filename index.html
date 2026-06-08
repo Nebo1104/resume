@@ -59,117 +59,137 @@
     </div>
 </div>
 
+```html
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
 <script>
 let моніторГрафік;
 
-// Ініціалізація віджета графіка
 const контекстКонвасу = document.getElementById('макроГрафік').getContext('2d');
+
 моніторГрафік = new Chart(контекстКонвасу, {
     type: 'line',
     data: {
         labels: [],
         datasets: [
-            { label: 'Курс USD (Грн)', data: [], borderColor: '#1e7145', backgroundColor: 'rgba(30,113,69,0.1)', yAxisID: 'y' },
-            { label: 'Інфляція (%)', data: [], borderColor: '#e74c3c', backgroundColor: 'rgba(231,76,60,0.1)', yAxisID: 'y1' }
+            {
+                label: 'Курс USD',
+                data: [],
+                borderColor: '#1e7145',
+                yAxisID: 'y'
+            },
+            {
+                label: 'Інфляція (%)',
+                data: [],
+                borderColor: '#e74c3c',
+                yAxisID: 'y1'
+            }
         ]
     },
     options: {
         responsive: true,
         scales: {
-            y: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Курс гривні до USD' } },
-            y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Рівень інфляції (%)' }, grid: { drawOnChartArea: false } }
+            y: {
+                position: 'left',
+                title: {
+                    display: true,
+                    text: 'USD/UAH'
+                }
+            },
+            y1: {
+                position: 'right',
+                grid: {
+                    drawOnChartArea: false
+                },
+                title: {
+                    display: true,
+                    text: 'Інфляція (%)'
+                }
+            }
         }
     }
 });
 
-// Головна функція збору даних
 async function запуститиПарсингДаних() {
-    const лоадер = document.getElementById('індикаторЗавантаження');
-    лоадер.style.display = 'block';
 
-    const цільовіРоки = ["2019", "2020", "2021", "2022", "2023", "2024"];
-    const посиланняСвітовийБанк = "https://worldbank.org";
-    
+    const loader = document.getElementById("індикаторЗавантаження");
+    loader.style.display = "block";
+
     try {
-        // Формуємо запити до НБУ через CORS-проксі
-        const запитиНБУ = цільовіРоки.map(рік => {
-            const оригінальнеПосиланняНБУ = `https://bank.gov.ua{рік}0615&json`;
-            return fetch(`https://allorigins.win{encodeURIComponent(оригінальнеПосиланняНБУ)}`);
-        });
 
-        // Паралельно завантажуємо дані з усіх серверів
-        const [відповідьСвітовийБанк, ...відповідіНБУ] = await Promise.all([
-            fetch(посиланняСвітовийБанк),
-            ...запитиНБУ
-        ]);
+        const роки = ['2019','2020','2021','2022','2023','2024'];
 
-        // 1. Обробка відповідей від Світового Банку (Інфляція)
-        const даніСвітовогоБанку = await відповідьСвітовийБанк.json();
+        const інфляціяURL =
+            'https://api.worldbank.org/v2/country/UA/indicator/FP.CPI.TOTL.ZG?format=json&per_page=100';
+
+        const відповідьWB = await fetch(інфляціяURL);
+        const даніWB = await відповідьWB.json();
+
         const картаІнфляції = {};
-        
-        if (Array.isArray(даніСвітовогоБанку) && даніСвітовогоБанку[1]) {
-            даніСвітовогоБанку[1].forEach(запис => {
-                if (запис && запис.date) {
-                    картаІнфляції[запис.date] = запис.value ? запис.value.toFixed(1) : "0.0";
+
+        if (даніWB[1]) {
+            даніWB[1].forEach(item => {
+                if (item.date && item.value !== null) {
+                    картаІнфляції[item.date] = Number(item.value).toFixed(1);
                 }
             });
         }
 
-        // 2. Обробка відповідей від НБУ (Курс валют)
         const картаКурсів = {};
-        for (let i = 0; i < відповідіНБУ.length; i++) {
-            const рік = цільовіРоки[i];
-            try {
-                const відповідьПроксі = await відповідіНБУ[i].json();
-                const оригінальніДаніНБУ = JSON.parse(відповідьПроксі.contents); 
-                
-                if (Array.isArray(оригінальніДаніНБУ) && оригінальніДаніНБУ.length > 0 && оригінальніДаніНБУ[0].rate) {
-                    картаКурсів[рік] = оригінальніДаніНБУ[0].rate.toFixed(2);
-                } else {
-                    картаКурсів[рік] = "0.00";
-                }
-            } catch (помилкаНБУ) {
-                console.warn(`Не вдалося обробити курс за ${рік} рік:`, помилкаНБУ);
-                картаКурсів[рік] = "0.00";
+
+        for (const рік of роки) {
+
+            const дата = `${рік}0615`;
+
+            const url =
+                `https://bank.gov.ua/NBUStatService/v1/statdirectory/exchange?valcode=USD&date=${дата}&json`;
+
+            const response = await fetch(url);
+            const data = await response.json();
+
+            if (data.length > 0) {
+                картаКурсів[рік] = Number(data[0].rate).toFixed(2);
             }
         }
 
-        // 3. Синхронізація для зведеної таблиці та графіків
-        const впорядкованіРоки = [...цільовіРоки].sort();
-        const масивКурсівДляГрафіка = [];
-        const масивІнфляціїДляГрафіка = [];
-        
-        const таблиця = document.getElementById('тілоТаблиці');
-        таблиця.innerHTML = ""; 
+        const tbody = document.getElementById("тілоТаблиці");
+        tbody.innerHTML = "";
 
-        впорядкованіРоки.forEach(рік => {
-            const курс = картаКурсів[рік] || "0.00";
-            const інфляція = картаІнфляції[рік] || "0.0";
-            
-            масивКурсівДляГрафіка.push(kurs = курс);
-            масивІнфляціїДляГрафіка.push(inf = інфляція);
+        const курси = [];
+        const інфляція = [];
 
-            const рядок = `<tr>
-                <td><strong>${рік}</strong></td>
-                <td>${курс} грн</td>
-                <td>${інфляція}%</td>
-            </tr>`;
-            таблиця.innerHTML += рядок;
+        роки.forEach(рік => {
+
+            const курс = картаКурсів[рік] || 0;
+            const інфл = картаІнфляції[рік] || 0;
+
+            курси.push(Number(курс));
+            інфляція.push(Number(інфл));
+
+            tbody.innerHTML += `
+                <tr>
+                    <td>${рік}</td>
+                    <td>${курс}</td>
+                    <td>${інфл}</td>
+                </tr>
+            `;
         });
 
-        // 4. Оновлення дашборду новими даними за допомогою правильного синтаксису Chart.js
-        моніторГрафік.data.labels = впорядкованіРоки;
-        моніторГрафік.data.datasets[0].data = масивКурсівДляГрафіка;
-        моніторГрафік.data.datasets[1].data = масивІнфляціїДляГрафіка;
+        моніторГрафік.data.labels = роки;
+        моніторГрафік.data.datasets[0].data = курси;
+        моніторГрафік.data.datasets[1].data = інфляція;
+
         моніторГрафік.update();
 
-        лоадер.style.display = 'none';
-        alert("Дані успішно спарсено та синхронізовано з серверами НБУ та Світового Банку!");
+    } catch (e) {
 
-    } catch (загальнаПомилка) {
-        лоадер.style.display = 'none';
-        console.error("Детальна помилка виконання:", загальнаПомилка);
-        alert("Сталася помилка під час обробки макроекономічних даних. Спробуйте ще раз.");
+        console.error(e);
+        alert("Помилка отримання даних");
+
+    } finally {
+
+        loader.style.display = "none";
+
     }
 }
 </script>
