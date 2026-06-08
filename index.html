@@ -15,7 +15,6 @@
         button:hover { background: #154f30; }
         .dashboard-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-top: 30px; }
         .card { background: #fff; border: 1px solid #e2e8f0; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
-        /* Стилі для симуляції зведеної таблиці Excel */
         table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; margin-top: 10px; }
         th { background: #1e7145; color: white; padding: 10px; }
         td { padding: 10px; border-bottom: 1px solid #e2e8f0; }
@@ -29,28 +28,28 @@
     <h1>🏛️ Макроекономічний Монітор України</h1>
     <p class="subtitle">Інтеграція даних API НБУ та World Bank API (Аналітична панель кандидата)</p>
     
-    <button onclick="fetchMacroData()">🔄 Запустити парсинг та оновити аналітику</button>
-    <div id="loader" class="loading">⏳ Підключення до серверів НБУ та Світового Банку...</div>
+    <button onclick="запуститиПарсингДаних()">🔄 Запустити парсинг та оновити аналітику</button>
+    <div id="індикаторЗавантаження" class="loading">⏳ Підключення до серверів НБУ та Світового Банку...</div>
 
     <div class="dashboard-grid">
-        <!-- Блок Дашборду (Графік) -->
+        <!-- Блок Дашборду (Графік з двома осями) -->
         <div class="card">
             <h3>📈 Динаміка: Інфляція vs Курс USD (По роках)</h3>
-            <canvas id="macroChart"></canvas>
+            <canvas id="макроГрафік"></canvas>
         </div>
 
-        <!-- Блок Зведеної Таблиці (Pivot Table) -->
+        <!-- Блок Зведеної Таблиці (Аналог Excel Pivot Table) -->
         <div class="card">
             <h3>📊 Зведена таблиця</h3>
-            <table id="pivotTable">
+            <table id="зведенаТаблиця">
                 <thead>
                     <tr>
                         <th>Рік</th>
                         <th>Курс USD (НБУ)</th>
-                        <th>Інфляція % (WB)</th>
+                        <th>Інфляція % (СБ)</th>
                     </tr>
                 </thead>
-                <tbody id="pivotBody">
+                <tbody id="тілоТаблиці">
                     <tr>
                         <td colspan="3" style="text-align:center; color:#95a5a6;">Натисніть кнопку для завантаження даних</td>
                     </tr>
@@ -61,11 +60,11 @@
 </div>
 
 <script>
-let macroChart;
+let моніторГрафік;
 
-// Ініціалізація графіка при завантаженні сторінки
-const ctx = document.getElementById('macroChart').getContext('2d');
-macroChart = new Chart(ctx, {
+// Ініціалізація віджета графіка
+const контекстКонвасу = document.getElementById('макроГрафік').getContext('2d');
+моніторГрафік = new Chart(контекстКонвасу, {
     type: 'line',
     data: {
         labels: [],
@@ -78,97 +77,104 @@ macroChart = new Chart(ctx, {
         responsive: true,
         scales: {
             y: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Курс гривні до USD' } },
-            y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Інфляція (%)' }, grid: { drawOnChartArea: false } }
+            y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Рівень інфляції (%)' }, grid: { drawOnChartArea: false } }
         }
     }
 });
 
-// Головна функція парсингу з обходом CORS-обмежень
-async function fetchMacroData() {
-    const loader = document.getElementById('loader');
-    loader.style.display = 'block';
+// Головна функція збору даних з серверів
+async function запуститиПарсингДаних() {
+    const лоадер = document.getElementById('індикаторЗавантаження');
+    лоадер.style.display = 'block';
 
-    const targetYears = ["2019", "2020", "2021", "2022", "2023", "2024"];
-    
-    // Світовий банк віддає заголовки CORS нормально, його можна викликати напряму
-    const wbUrl = "https://worldbank.org";
+    const цільовіРоки = ["2019", "2020", "2021", "2022", "2023", "2024"];
+    const посиланняСвітовийБанк = "https://worldbank.org";
     
     try {
-        // Формуємо масив запитів. Для НБУ кожен лінк обгортаємо через проксі-сервер AllOrigins
-        const nbuRequests = targetYears.map(year => {
-            const originalNbuUrl = `https://bank.gov.ua{year}0615&json`;
-            return fetch(`https://allorigins.win{encodeURIComponent(originalNbuUrl)}`);
+        // Загортаємо кожен запит до НБУ у CORS-проксі для успішної роботи в браузері
+        const запитиНБУ = цільовіРоки.map(рік => {
+            const оригінальнеПосиланняНБУ = `https://bank.gov.ua{рік}0615&json`;
+            return fetch(`https://allorigins.win{encodeURIComponent(оригінальнеПосиланняНБУ)}`);
         });
 
-        // Виконуємо паралельний парсинг усіх джерел
-        const [wbResponse, ...nbuResponses] = await Promise.all([
-            fetch(wbUrl),
-            ...nbuRequests
+        // Виконуємо паралельне завантаження з усіх джерел одночасно
+        const [відповідьСвітовийБанк, ...відповідіНБУ] = await Promise.all([
+            fetch(посиланняСвітовийБанк),
+            ...запитиНБУ
         ]);
 
-        // 1. Оновлюємо дані Світового банку (Інфляція)
-        const wbData = await wbResponse.json();
-        const inflationRaw = wbData[1]; 
-        const inflationMap = {};
+        // 1. Обробка відповідей від Світового Банку (Інфляція)
+        const даніСвітовогоБанку = await відповідьСвітовийБанк.json();
+        const картаІнфляції = {};
         
-        inflationRaw.forEach(item => {
-            inflationMap[item.date] = item.value ? item.value.toFixed(1) : "0.0";
-        });
+        if (Array.isArray(даніСвітовогоБанку) && даніСвітовогоБанку[1]) {
+            даніСвітовогоБанку[1].forEach(запис => {
+                if (запис && запис.date) {
+                    картаІнфляції[запис.date] = запис.value ? запис.value.toFixed(1) : "0.0";
+                }
+            });
+        }
 
-        // 2. Оновлюємо дані НБУ (Курс долара через проксі)
-        const usdMap = {};
-        for (let i = 0; i < nbuResponses.length; i++) {
-            const proxyResponse = await nbuResponses[i].json();
-            // Декодуємо оригінальну відповідь, яку проксі сховав у поле .contents
-            const nbuData = JSON.parse(proxyResponse.contents); 
-            const year = targetYears[i];
-            
-            if (nbuData && nbuData.length > 0) {
-                usdMap[year] = nbuData[0].rate.toFixed(2);
-            } else {
-                usdMap[year] = "0.00";
+        // 2. Обробка відповідей від Національного Банку України (Курс валют)
+        const картаКурсів = {};
+        for (let i = 0; i < відповідіНБУ.length; i++) {
+            const рік = цільовіРоки[i];
+            try {
+                const відповідьПроксі = await відповідіНБУ[i].json();
+                const оригінальніДаніНБУ = JSON.parse(відповідьПроксі.contents); 
+                
+                // Витягуємо курс з першого елемента масиву НБУ
+                if (Array.isArray(оригінальніДаніНБУ) && оригінальніДаніНБУ.length > 0 && оригінальніДаніНБУ[0].rate) {
+                    картаКурсів[рік] = оригінальніДаніНБУ[0].rate.toFixed(2);
+                } else {
+                    картаКурсів[рік] = "0.00";
+                }
+            } catch (помилкаНБУ) {
+                console.warn(`Не вдалося обробити курс за ${рік} рік:`, помилкаНБУ);
+                картаКурсів[рік] = "0.00";
             }
         }
 
-        // 3. Синхронізація для зведеної таблиці та графіків
-        const yearsLabels = [...targetYears].sort();
-        const chartUsdData = [];
-        const chartInflationData = [];
+        // 3. Синхронізація масивів для побудови зведеної таблиці та графіків
+        const впорядкованіРоки = [...цільовіРоки].sort();
+        const масивКурсівДляГрафіка = [];
+        const масивІнфляціїДляГрафіка = [];
         
-        const tableBody = document.getElementById('pivotBody');
-        tableBody.innerHTML = ""; 
+        const таблиця = document.getElementById('тілоТаблиці');
+        таблиця.innerHTML = ""; 
 
-        yearsLabels.forEach(year => {
-            const usd = usdMap[year];
-            const inflation = inflationMap[year];
+        впорядкованіРоки.forEach(рік => {
+            const курс = картаКурсів[рік] || "0.00";
+            const інфляція = картаІнфляції[рік] || "0.0";
             
-            chartUsdData.push(usd);
-            chartInflationData.push(inflation);
+            масивКурсівДляГрафіка.push(курс);
+            масивІнфляціїДляГрафіка.push(інфляція);
 
-            // Будуємо HTML-рядки Pivot Table
-            const row = `<tr>
-                <td><strong>${year}</strong></td>
-                <td>${usd} грн</td>
-                <td>${inflation}%</td>
+            // Динамічно додаємо рядки у зведену таблицю
+            const рядок = `<tr>
+                <td><strong>${рік}</strong></td>
+                <td>${курс} грн</td>
+                <td>${інфляція}%</td>
             </tr>`;
-            tableBody.innerHTML += row;
+            таблиця.innerHTML += row = рядок;
         });
 
-        // 4. Рендеринг дашборду
-        macroChart.data.labels = yearsLabels;
-        macroChart.data.datasets[0].data = chartUsdData;
-        macroChart.data.datasets[1].data = chartInflationData;
-        macroChart.update();
+        // 4. Перемальовуємо дашборд новими даними
+        моніторГрафік.data.labels = впорядкованіРоки;
+        моніторГрафік.data.datasets[0].data = масивКурсівДляGradika = масивКурсівДляГрафіка;
+        моніторГрафік.data.datasets[1].data = масивІнфляціїДляГрафіка;
+        моніторГрафік.update();
 
-        loader.style.display = 'none';
-        alert("Дані успішно спарсено за допомогою CORS-проксі!");
+        лоадер.style.display = 'none';
+        alert("Дані успішно спарсено та синхронізовано з серверами НБУ та Світового Банку!");
 
-    } catch (error) {
-        loader.style.display = 'none';
-        console.error("Деталі помилки в консолі:", error);
-        alert("Помилка парсингу. Відкрийте консоль браузера (F12 -> Console) для перегляду логів.");
+    } catch (загальнаПомилка) {
+        лоадер.style.display = 'none';
+        console.error("Помилка під час виконання скрипту:", загальнаПомилка);
+        alert("Сталася помилка під час обробки макроекономічних даних. Перевірте консоль браузера.");
     }
-}</script>
+}
+</script>
 
 </body>
 </html>
