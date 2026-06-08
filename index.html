@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>НБУ & Світовий Банк: Макро-Дашборд</title>
+    <!-- Підключаємо бібліотеку для графіків Chart.js -->
+    <script src="https://jsdelivr.net"></script>
+    <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; background: #f0f4f1; color: #2c3e50; margin: 0; padding: 30px; text-align: center; }
+        .container { max-width: 1000px; background: white; margin: 0 auto; padding: 25px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+        h1 { color: #1e7145; font-size: 28px; margin-bottom: 5px; }
+        .subtitle { color: #7f8c8d; margin-bottom: 25px; }
+        button { background: #1e7145; color: white; border: none; padding: 12px 28px; font-size: 16px; font-weight: bold; border-radius: 6px; cursor: pointer; transition: 0.2s; }
+        button:hover { background: #154f30; }
+        .dashboard-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; margin-top: 30px; }
+        .card { background: #fff; border: 1px solid #e2e8f0; padding: 20px; border-radius: 8px; box-shadow: 0 2px 5px rgba(0,0,0,0.02); }
+        /* Стилі для симуляції зведеної таблиці Excel */
+        table { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; margin-top: 10px; }
+        th { background: #1e7145; color: white; padding: 10px; }
+        td { padding: 10px; border-bottom: 1px solid #e2e8f0; }
+        tr:nth-child(even) { background: #f8fafc; }
+        .loading { display: none; color: #e67e22; font-weight: bold; margin: 15px; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>🏛️ Макроекономічний Монітор України</h1>
+    <p class="subtitle">Інтеграція даних API НБУ та World Bank API (Аналітична панель кандидата)</p>
+    
+    <button onclick="fetchMacroData()">🔄 Запустити парсинг та оновити аналітику</button>
+    <div id="loader" class="loading">⏳ Підключення до серверів НБУ та Світового Банку...</div>
+
+    <div class="dashboard-grid">
+        <!-- Блок Дашборду (Графік) -->
+        <div class="card">
+            <h3>📈 Динаміка: Інфляція vs Курс USD (По роках)</h3>
+            <canvas id="macroChart"></canvas>
+        </div>
+
+        <!-- Блок Зведеної Таблиці (Pivot Table) -->
+        <div class="card">
+            <h3>📊 Зведена таблиця</h3>
+            <table id="pivotTable">
+                <thead>
+                    <tr>
+                        <th>Рік</th>
+                        <th>Курс USD (НБУ)</th>
+                        <th>Інфляція % (WB)</th>
+                    </tr>
+                </thead>
+                <tbody id="pivotBody">
+                    <tr>
+                        <td colspan="3" style="text-align:center; color:#95a5a6;">Натисніть кнопку для завантаження даних</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+let macroChart;
+
+// Ініціалізація графіка при завантаженні сторінки
+const ctx = document.getElementById('macroChart').getContext('2d');
+macroChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+        labels: [],
+        datasets: [
+            { label: 'Курс USD (Грн)', data: [], borderColor: '#1e7145', backgroundColor: 'rgba(30,113,69,0.1)', yAxisID: 'y' },
+            { label: 'Інфляція (%)', data: [], borderColor: '#e74c3c', backgroundColor: 'rgba(231,76,60,0.1)', yAxisID: 'y1' }
+        ]
+    },
+    options: {
+        responsive: true,
+        scales: {
+            y: { type: 'linear', display: true, position: 'left', title: { display: true, text: 'Курс гривні до USD' } },
+            y1: { type: 'linear', display: true, position: 'right', title: { display: true, text: 'Інфляція (%)' }, grid: { drawOnChartArea: false } }
+        }
+    }
+});
+
+// Головна функція парсингу з обходом CORS-обмежень
+async function fetchMacroData() {
+    const loader = document.getElementById('loader');
+    loader.style.display = 'block';
+
+    const targetYears = ["2019", "2020", "2021", "2022", "2023", "2024"];
+    
+    // Світовий банк віддає заголовки CORS нормально, його можна викликати напряму
+    const wbUrl = "https://worldbank.org";
+    
+    try {
+        // Формуємо масив запитів. Для НБУ кожен лінк обгортаємо через проксі-сервер AllOrigins
+        const nbuRequests = targetYears.map(year => {
+            const originalNbuUrl = `https://bank.gov.ua{year}0615&json`;
+            return fetch(`https://allorigins.win{encodeURIComponent(originalNbuUrl)}`);
+        });
+
+        // Виконуємо паралельний парсинг усіх джерел
+        const [wbResponse, ...nbuResponses] = await Promise.all([
+            fetch(wbUrl),
+            ...nbuRequests
+        ]);
+
+        // 1. Оновлюємо дані Світового банку (Інфляція)
+        const wbData = await wbResponse.json();
+        const inflationRaw = wbData[1]; 
+        const inflationMap = {};
+        
+        inflationRaw.forEach(item => {
+            inflationMap[item.date] = item.value ? item.value.toFixed(1) : "0.0";
+        });
+
+        // 2. Оновлюємо дані НБУ (Курс долара через проксі)
+        const usdMap = {};
+        for (let i = 0; i < nbuResponses.length; i++) {
+            const proxyResponse = await nbuResponses[i].json();
+            // Декодуємо оригінальну відповідь, яку проксі сховав у поле .contents
+            const nbuData = JSON.parse(proxyResponse.contents); 
+            const year = targetYears[i];
+            
+            if (nbuData && nbuData.length > 0) {
+                usdMap[year] = nbuData[0].rate.toFixed(2);
+            } else {
+                usdMap[year] = "0.00";
+            }
+        }
+
+        // 3. Синхронізація для зведеної таблиці та графіків
+        const yearsLabels = [...targetYears].sort();
+        const chartUsdData = [];
+        const chartInflationData = [];
+        
+        const tableBody = document.getElementById('pivotBody');
+        tableBody.innerHTML = ""; 
+
+        yearsLabels.forEach(year => {
+            const usd = usdMap[year];
+            const inflation = inflationMap[year];
+            
+            chartUsdData.push(usd);
+            chartInflationData.push(inflation);
+
+            // Будуємо HTML-рядки Pivot Table
+            const row = `<tr>
+                <td><strong>${year}</strong></td>
+                <td>${usd} грн</td>
+                <td>${inflation}%</td>
+            </tr>`;
+            tableBody.innerHTML += row;
+        });
+
+        // 4. Рендеринг дашборду
+        macroChart.data.labels = yearsLabels;
+        macroChart.data.datasets[0].data = chartUsdData;
+        macroChart.data.datasets[1].data = chartInflationData;
+        macroChart.update();
+
+        loader.style.display = 'none';
+        alert("Дані успішно спарсено за допомогою CORS-проксі!");
+
+    } catch (error) {
+        loader.style.display = 'none';
+        console.error("Деталі помилки в консолі:", error);
+        alert("Помилка парсингу. Відкрийте консоль браузера (F12 -> Console) для перегляду логів.");
+    }
+}</script>
+
+</body>
+</html>
